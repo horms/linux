@@ -454,7 +454,8 @@ int ovs_vport_receive(struct vport *vport, struct sk_buff *skb,
 	}
 
 	/* Extract flow from 'skb' into 'key'. */
-	error = ovs_flow_key_extract(tun_info, skb, &key);
+	error = ovs_flow_key_extract(tun_info, skb, &key,
+				     vport->ops->is_layer3);
 	if (unlikely(error)) {
 		kfree_skb(skb);
 		return error;

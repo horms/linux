@@ -62,6 +62,7 @@ struct sw_flow_key {
 		u32	priority;	/* Packet QoS priority. */
 		u32	skb_mark;	/* SKB mark. */
 		u16	in_port;	/* Input switch port (or DP_MAX_PORTS). */
+		bool	is_layer3;	/* Packet has no Ethernet header */
 	} __packed phy; /* Safe when right after 'tun_key'. */
 	u8 tun_proto;			/* Protocol of encapsulating tunnel. */
 	u32 ovs_flow_hash;		/* Datapath computed hash value.  */
@@ -219,8 +220,8 @@ u64 ovs_flow_used_time(unsigned long flow_jiffies);
 
 int ovs_flow_key_update(struct sk_buff *skb, struct sw_flow_key *key);
 int ovs_flow_key_extract(const struct ip_tunnel_info *tun_info,
-			 struct sk_buff *skb,
-			 struct sw_flow_key *key);
+			 struct sk_buff *skb, struct sw_flow_key *key,
+			 bool is_layer3);
 /* Extract key from packet coming from userspace. */
 int ovs_flow_key_extract_userspace(struct net *net, const struct nlattr *attr,
 				   struct sk_buff *skb,

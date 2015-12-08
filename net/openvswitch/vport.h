@@ -129,10 +129,13 @@ struct vport_parms {
  * existing vport to a &struct sk_buff.  May be %NULL for a vport that does not
  * have any configuration.
  * @send: Send a packet on the device.
+ * @is_layer3: true if vport is a tunnel that carries layer3 packets
+ *             (inner packets without an ethernet header)
  * zero for dropped packets or negative for error.
  */
 struct vport_ops {
 	enum ovs_vport_type type;
+	bool is_layer3;
 
 	/* Called with ovs_mutex. */
 	struct vport *(*create)(const struct vport_parms *);

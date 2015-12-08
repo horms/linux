@@ -249,6 +249,12 @@ static netdev_tx_t internal_dev_recv(struct sk_buff *skb)
 	struct net_device *netdev = skb->dev;
 	struct pcpu_sw_netstats *stats;
 
+	/* Only send/receive L2 packets */
+	if (!skb->mac_len) {
+		kfree_skb(skb);
+		return -EINVAL;
+	}
+
 	if (unlikely(!(netdev->flags & IFF_UP))) {
 		kfree_skb(skb);
 		netdev->stats.rx_dropped++;
