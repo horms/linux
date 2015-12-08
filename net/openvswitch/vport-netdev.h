@@ -33,4 +33,6 @@ int __init ovs_netdev_init(void);
 void ovs_netdev_exit(void);
 
 void ovs_netdev_tunnel_destroy(struct vport *vport);
+
+int ovs_netdev_send_tap(struct sk_buff *skb);
 #endif /* vport_netdev.h */
