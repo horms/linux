@@ -87,7 +87,7 @@ static struct vport *gre_create(const struct vport_parms *parms)
 static struct vport_ops ovs_gre_vport_ops = {
 	.type		= OVS_VPORT_TYPE_GRE,
 	.create		= gre_create,
-	.send		= dev_queue_xmit,
+	.send		= ovs_netdev_send_tap,
 	.destroy	= ovs_netdev_tunnel_destroy,
 };
 

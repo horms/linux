@@ -116,7 +116,7 @@ static struct vport_ops ovs_geneve_vport_ops = {
 	.create		= geneve_create,
 	.destroy	= ovs_netdev_tunnel_destroy,
 	.get_options	= geneve_get_options,
-	.send		= dev_queue_xmit,
+	.send		= ovs_netdev_send_tap,
 };
 
 static int __init ovs_geneve_tnl_init(void)
