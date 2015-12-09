@@ -4516,30 +4516,44 @@ int skb_vlan_pop(struct sk_buff *skb)
 }
 EXPORT_SYMBOL(skb_vlan_pop);
 
+int skb_vlan_deaccel(struct sk_buff *skb)
+{
+	unsigned int offset;
+	int err;
+
+	if (!skb_vlan_tag_present(skb))
+		return 0;
+
+	offset = skb->data - skb_mac_header(skb);
+
+	/* __vlan_insert_tag expect skb->data pointing to mac header.
+	 * So change skb->data before calling it and change back to
+	 * original position later
+	 */
+	__skb_push(skb, offset);
+	err = __vlan_insert_tag(skb, skb->vlan_proto, skb_vlan_tag_get(skb));
+	if (err) {
+		__skb_pull(skb, offset);
+		return err;
+	}
+
+	skb->protocol = skb->vlan_proto;
+	skb->mac_len += VLAN_HLEN;
+
+	skb_postpush_rcsum(skb, skb->data + (2 * ETH_ALEN), VLAN_HLEN);
+	__skb_pull(skb, offset);
+
+	return 0;
+}
+EXPORT_SYMBOL(skb_vlan_deaccel);
+
 int skb_vlan_push(struct sk_buff *skb, __be16 vlan_proto, u16 vlan_tci)
 {
-	if (skb_vlan_tag_present(skb)) {
-		unsigned int offset = skb->data - skb_mac_header(skb);
-		int err;
+	int err;
 
-		/* __vlan_insert_tag expect skb->data pointing to mac header.
-		 * So change skb->data before calling it and change back to
-		 * original position later
-		 */
-		__skb_push(skb, offset);
-		err = __vlan_insert_tag(skb, skb->vlan_proto,
-					skb_vlan_tag_get(skb));
-		if (err) {
-			__skb_pull(skb, offset);
-			return err;
-		}
-
-		skb->protocol = skb->vlan_proto;
-		skb->mac_len += VLAN_HLEN;
-
-		skb_postpush_rcsum(skb, skb->data + (2 * ETH_ALEN), VLAN_HLEN);
-		__skb_pull(skb, offset);
-	}
+	err = skb_vlan_deaccel(skb);
+	if (err)
+		return err;
 	__vlan_hwaccel_put_tag(skb, vlan_proto, vlan_tci);
 	return 0;
 }
