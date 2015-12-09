@@ -2940,6 +2940,7 @@ struct sk_buff *skb_vlan_untag(struct sk_buff *skb);
 int skb_ensure_writable(struct sk_buff *skb, int write_len);
 int skb_vlan_pop(struct sk_buff *skb);
 int skb_vlan_push(struct sk_buff *skb, __be16 vlan_proto, u16 vlan_tci);
+int skb_vlan_deaccel(struct sk_buff *skb);
 
 static inline int memcpy_from_msg(void *data, struct msghdr *msg, int len)
 {
