@@ -47,20 +47,25 @@
 #include "vport.h"
 #include "vport-netdev.h"
 
+static struct vport_ops ovs_gre_tap_vport_ops;
 static struct vport_ops ovs_gre_vport_ops;
 
-static struct vport *gre_tnl_create(const struct vport_parms *parms)
+static struct vport *gre_tnl_create(const struct vport_parms *parms,
+				    const struct vport_ops *ops,
+				    struct net_device *fn(struct net *net,
+							  const char *name,
+							  u8 name_assign_type))
 {
 	struct net *net = ovs_dp_get_net(parms->dp);
 	struct net_device *dev;
 	struct vport *vport;
 
-	vport = ovs_vport_alloc(0, &ovs_gre_vport_ops, parms);
+	vport = ovs_vport_alloc(0, ops, parms);
 	if (IS_ERR(vport))
 		return vport;
 
 	rtnl_lock();
-	dev = gretap_fb_dev_create(net, parms->name, NET_NAME_USER);
+	dev = fn(net, parms->name, NET_NAME_USER);
 	if (IS_ERR(dev)) {
 		rtnl_unlock();
 		ovs_vport_free(vport);
@@ -70,34 +75,53 @@ static struct vport *gre_tnl_create(const struct vport_parms *parms)
 	dev_change_flags(dev, dev->flags | IFF_UP);
 	rtnl_unlock();
 
-	return vport;
+	return ovs_netdev_link(vport, parms->name);
+}
+
+static struct vport *gre_tap_create(const struct vport_parms *parms)
+{
+	return gre_tnl_create(parms, &ovs_gre_tap_vport_ops,
+			      gretap_fb_dev_create);
 }
 
 static struct vport *gre_create(const struct vport_parms *parms)
 {
-	struct vport *vport;
-
-	vport = gre_tnl_create(parms);
-	if (IS_ERR(vport))
-		return vport;
-
-	return ovs_netdev_link(vport, parms->name);
+	return gre_tnl_create(parms, &ovs_gre_vport_ops, gre_fb_dev_create);
 }
 
-static struct vport_ops ovs_gre_vport_ops = {
+static struct vport_ops ovs_gre_tap_vport_ops = {
 	.type		= OVS_VPORT_TYPE_GRE,
-	.create		= gre_create,
+	.create		= gre_tap_create,
 	.send		= ovs_netdev_send_tap,
+	.destroy	= ovs_netdev_tunnel_destroy,
+};
+
+static struct vport_ops ovs_gre_vport_ops = {
+	.type		= OVS_VPORT_TYPE_GRE_L3,
+	.is_layer3	= true,
+	.create		= gre_create,
+	.send		= ovs_netdev_send,
 	.destroy	= ovs_netdev_tunnel_destroy,
 };
 
 static int __init ovs_gre_tnl_init(void)
 {
-	return ovs_vport_ops_register(&ovs_gre_vport_ops);
+	int err;
+
+	err = ovs_vport_ops_register(&ovs_gre_tap_vport_ops);
+	if (err)
+		return err;
+
+	err = ovs_vport_ops_register(&ovs_gre_vport_ops);
+	if (err)
+		ovs_vport_ops_unregister(&ovs_gre_tap_vport_ops);
+
+	return err;
 }
 
 static void __exit ovs_gre_tnl_exit(void)
 {
+	ovs_vport_ops_unregister(&ovs_gre_tap_vport_ops);
 	ovs_vport_ops_unregister(&ovs_gre_vport_ops);
 }
 
@@ -106,4 +130,5 @@ module_exit(ovs_gre_tnl_exit);
 
 MODULE_DESCRIPTION("OVS: GRE switching port");
 MODULE_LICENSE("GPL");
-MODULE_ALIAS("vport-type-3");
+MODULE_ALIAS("vport-type-3"); /* OVS_VPORT_TYPE_GRE (3) */
+MODULE_ALIAS("vport-type-6"); /* OVS_VPORT_TYPE_GRE_L3 (6) */

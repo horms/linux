@@ -99,7 +99,8 @@ struct vport *ovs_netdev_link(struct vport *vport, const char *name)
 	}
 
 	if (vport->dev->flags & IFF_LOOPBACK ||
-	    vport->dev->type != ARPHRD_ETHER ||
+	    (vport->dev->type != ARPHRD_ETHER &&
+	     vport->dev->type != ARPHRD_IPGRE) ||
 	    ovs_is_internal_dev(vport->dev)) {
 		err = -EINVAL;
 		goto error_put;
@@ -206,6 +207,17 @@ int ovs_netdev_send_tap(struct sk_buff *skb)
 	return -EINVAL;
 }
 EXPORT_SYMBOL_GPL(ovs_netdev_send_tap);
+
+int ovs_netdev_send(struct sk_buff *skb)
+{
+	/* Only send L3 packets */
+	if (!skb->mac_len)
+		return dev_queue_xmit(skb);
+
+	kfree_skb(skb);
+	return -EINVAL;
+}
+EXPORT_SYMBOL_GPL(ovs_netdev_send);
 
 /* Returns null if this device is not attached to a datapath. */
 struct vport *ovs_netdev_get_vport(struct net_device *dev)
