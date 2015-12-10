@@ -35,4 +35,5 @@ void ovs_netdev_exit(void);
 void ovs_netdev_tunnel_destroy(struct vport *vport);
 
 int ovs_netdev_send_tap(struct sk_buff *skb);
+int ovs_netdev_send(struct sk_buff *skb);
 #endif /* vport_netdev.h */

@@ -25,4 +25,6 @@ int gre_del_protocol(const struct gre_protocol *proto, u8 version);
 
 struct net_device *gretap_fb_dev_create(struct net *net, const char *name,
 				       u8 name_assign_type);
+struct net_device *gre_fb_dev_create(struct net *net, const char *name,
+				     u8 name_assign_type);
 #endif

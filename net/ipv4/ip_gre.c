@@ -514,7 +514,8 @@ static struct rtable *gre_get_rt(struct sk_buff *skb,
 	return ip_route_output_key(net, fl);
 }
 
-static void gre_fb_xmit(struct sk_buff *skb, struct net_device *dev)
+static void gre_fb_xmit(struct sk_buff *skb, struct net_device *dev,
+			__be16 proto)
 {
 	struct ip_tunnel_info *tun_info;
 	const struct ip_tunnel_key *key;
@@ -557,7 +558,7 @@ static void gre_fb_xmit(struct sk_buff *skb, struct net_device *dev)
 	}
 
 	flags = tun_info->key.tun_flags & (TUNNEL_CSUM | TUNNEL_KEY);
-	build_header(skb, tunnel_hlen, flags, htons(ETH_P_TEB),
+	build_header(skb, tunnel_hlen, flags, proto,
 		     tunnel_id_to_key(tun_info->key.tun_id), 0);
 
 	df = key->tun_flags & TUNNEL_DONT_FRAGMENT ?  htons(IP_DF) : 0;
@@ -598,7 +599,8 @@ static netdev_tx_t ipgre_xmit(struct sk_buff *skb,
 	const struct iphdr *tnl_params;
 
 	if (tunnel->collect_md) {
-		gre_fb_xmit(skb, dev);
+		//BUG_ON(dev->header_ops); // XXX: Delete me
+		gre_fb_xmit(skb, dev, skb->protocol);
 		return NETDEV_TX_OK;
 	}
 
@@ -642,7 +644,7 @@ static netdev_tx_t gre_tap_xmit(struct sk_buff *skb,
 	struct ip_tunnel *tunnel = netdev_priv(dev);
 
 	if (tunnel->collect_md) {
-		gre_fb_xmit(skb, dev);
+		gre_fb_xmit(skb, dev, htons(ETH_P_TEB));
 		return NETDEV_TX_OK;
 	}
 
@@ -1218,8 +1220,9 @@ static struct rtnl_link_ops ipgre_tap_ops __read_mostly = {
 	.get_link_net	= ip_tunnel_get_link_net,
 };
 
-struct net_device *gretap_fb_dev_create(struct net *net, const char *name,
-					u8 name_assign_type)
+struct net_device *gretap_fb_dev_create__(struct net *net, const char *name,
+					  u8 name_assign_type,
+					  struct rtnl_link_ops *link_ops)
 {
 	struct nlattr *tb[IFLA_MAX + 1];
 	struct net_device *dev;
@@ -1228,8 +1231,7 @@ struct net_device *gretap_fb_dev_create(struct net *net, const char *name,
 
 	memset(&tb, 0, sizeof(tb));
 
-	dev = rtnl_create_link(net, name, name_assign_type,
-			       &ipgre_tap_ops, tb);
+	dev = rtnl_create_link(net, name, name_assign_type, link_ops, tb);
 	if (IS_ERR(dev))
 		return dev;
 
@@ -1245,7 +1247,22 @@ out:
 	free_netdev(dev);
 	return ERR_PTR(err);
 }
+
+struct net_device *gretap_fb_dev_create(struct net *net, const char *name,
+					u8 name_assign_type)
+{
+	return gretap_fb_dev_create__(net, name, name_assign_type,
+				      &ipgre_tap_ops);
+}
 EXPORT_SYMBOL_GPL(gretap_fb_dev_create);
+
+struct net_device *gre_fb_dev_create(struct net *net, const char *name,
+				     u8 name_assign_type)
+{
+	return gretap_fb_dev_create__(net, name, name_assign_type,
+				      &ipgre_link_ops);
+}
+EXPORT_SYMBOL_GPL(gre_fb_dev_create);
 
 static int __net_init ipgre_tap_init_net(struct net *net)
 {
