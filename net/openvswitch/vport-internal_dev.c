@@ -48,6 +48,10 @@ static int internal_dev_xmit(struct sk_buff *skb, struct net_device *netdev)
 {
 	int len, err;
 
+	skb->protocol = eth_type_trans(skb, netdev);
+	skb_push(skb, ETH_HLEN);
+	skb_reset_mac_len(skb);
+
 	len = skb->len;
 	rcu_read_lock();
 	err = ovs_vport_receive(internal_dev_priv(netdev)->vport, skb, NULL);
