@@ -2038,7 +2038,13 @@ static int validate_set(const struct nlattr *a,
 		break;
 
 	case OVS_KEY_ATTR_TUNNEL:
-		if (eth_p_mpls(eth_type))
+		/* If an skb was not MPLS initially then it may be GSO
+		 * and in that case if it became MPLS then GSO can't be
+		 * performed because both MPLS and Tunnels make use
+		 * of the inner_protocol field of struct skbuff in order
+		 * to allow GSO to be performed in the inner packet.
+		 */
+		if (!eth_p_mpls(flow_key->eth.type) && eth_p_mpls(eth_type))
 			return -EINVAL;
 
 		if (masked)
