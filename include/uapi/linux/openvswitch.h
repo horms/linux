@@ -737,6 +737,8 @@ enum ovs_nat_attr {
  * is no MPLS label stack, as determined by ethertype, no action is taken.
  * @OVS_ACTION_ATTR_CT: Track the connection. Populate the conntrack-related
  * entries in the flow key.
+ * @OVS_ACTION_ATTR_PUSH_ETH: Push a new outermost Ethernet header onto the      * packet.
+ * @OVS_ACTION_ATTR_POP_ETH: Pop the outermost Ethernet header off the packet.
  *
  * Only a single header can be set with a single %OVS_ACTION_ATTR_SET.  Not all
  * fields within a header are modifiable, e.g. the IPv4 protocol and fragment
