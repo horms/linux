@@ -163,16 +163,20 @@ static int push_mpls(struct sk_buff *skb, struct sw_flow_key *key,
 		return -ENOMEM;
 
 	skb_push(skb, MPLS_HLEN);
-	memmove(skb_mac_header(skb) - MPLS_HLEN, skb_mac_header(skb),
-		skb->mac_len);
-	skb_reset_mac_header(skb);
 
-	new_mpls_lse = (__be32 *)skb_mpls_header(skb);
+	if (key->phy.is_layer3) {
+		new_mpls_lse = (__be32 *)skb->data;
+	} else {
+		update_ethertype(skb, eth_hdr(skb), mpls->mpls_ethertype);
+		memmove(skb_mac_header(skb) - MPLS_HLEN, skb_mac_header(skb),
+			skb->mac_len);
+		skb_reset_mac_header(skb);
+		new_mpls_lse = (__be32 *)skb_mpls_header(skb);
+	}
 	*new_mpls_lse = mpls->mpls_lse;
 
 	skb_postpush_rcsum(skb, new_mpls_lse, MPLS_HLEN);
 
-	update_ethertype(skb, eth_hdr(skb), mpls->mpls_ethertype);
 	if (!skb->inner_protocol)
 		skb_set_inner_protocol(skb, skb->protocol);
 	skb->protocol = mpls->mpls_ethertype;
@@ -184,26 +188,31 @@ static int push_mpls(struct sk_buff *skb, struct sw_flow_key *key,
 static int pop_mpls(struct sk_buff *skb, struct sw_flow_key *key,
 		    const __be16 ethertype)
 {
-	struct ethhdr *hdr;
-	int err;
+	if (!key->phy.is_layer3) {
+		struct ethhdr *hdr;
+		int err;
 
-	err = skb_ensure_writable(skb, skb->mac_len + MPLS_HLEN);
-	if (unlikely(err))
-		return err;
+		skb_postpull_rcsum(skb, skb_mpls_header(skb), MPLS_HLEN);
 
-	skb_postpull_rcsum(skb, skb_mpls_header(skb), MPLS_HLEN);
+		err = skb_ensure_writable(skb, skb->mac_len + MPLS_HLEN);
+		if (unlikely(err))
+			return err;
 
-	memmove(skb_mac_header(skb) + MPLS_HLEN, skb_mac_header(skb),
-		skb->mac_len);
+		/* skb_mpls_header() is used to locate the ethertype
+		 * field correctly in the presence of VLAN tags.
+		 */
+		hdr = (struct ethhdr *)(skb_mpls_header(skb) - ETH_HLEN);
+		update_ethertype(skb, hdr, ethertype);
+
+		memmove(skb_mac_header(skb) + MPLS_HLEN, skb_mac_header(skb),
+			skb->mac_len);
+	}
 
 	__skb_pull(skb, MPLS_HLEN);
-	skb_reset_mac_header(skb);
 
-	/* skb_mpls_header() is used to locate the ethertype
-	 * field correctly in the presence of VLAN tags.
-	 */
-	hdr = (struct ethhdr *)(skb_mpls_header(skb) - ETH_HLEN);
-	update_ethertype(skb, hdr, ethertype);
+	if (!key->phy.is_layer3)
+		skb_reset_mac_header(skb);
+
 	if (eth_p_mpls(skb->protocol))
 		skb->protocol = ethertype;
 
@@ -214,15 +223,23 @@ static int pop_mpls(struct sk_buff *skb, struct sw_flow_key *key,
 static int set_mpls(struct sk_buff *skb, struct sw_flow_key *flow_key,
 		    const __be32 *mpls_lse, const __be32 *mask)
 {
+	__be16 mac_len;
 	__be32 *stack;
 	__be32 lse;
 	int err;
 
+	if (flow_key->phy.is_layer3) {
+		mac_len = 0;
+		stack = (__be32 *)skb->data;
+	} else {
+		mac_len = skb->mac_len;
+	}
+
 	err = skb_ensure_writable(skb, skb->mac_len + MPLS_HLEN);
 	if (unlikely(err))
 		return err;
-
 	stack = (__be32 *)skb_mpls_header(skb);
+
 	lse = OVS_MASKED(*stack, *mpls_lse, *mask);
 	if (skb->ip_summed == CHECKSUM_COMPLETE) {
 		__be32 diff[] = { ~(*stack), lse };
@@ -292,6 +309,45 @@ static int set_eth_addr(struct sk_buff *skb, struct sw_flow_key *flow_key,
 
 	ether_addr_copy(flow_key->eth.src, eth_hdr(skb)->h_source);
 	ether_addr_copy(flow_key->eth.dst, eth_hdr(skb)->h_dest);
+	return 0;
+}
+
+/* pop_eth does not support VLAN packets as this action is never called
+ * for them.
+ */
+static int pop_eth(struct sk_buff *skb, struct sw_flow_key *key)
+{
+	skb_pull_rcsum(skb, ETH_HLEN);
+	skb_reset_mac_header(skb);
+	skb->mac_len -= ETH_HLEN;
+
+	key->phy.is_layer3 = true;
+	invalidate_flow_key(key);
+	return 0;
+}
+
+static int push_eth(struct sk_buff *skb, struct sw_flow_key *key,
+		    const struct ovs_action_push_eth *ethh)
+{
+	struct ethhdr *hdr;
+
+	/* Add the new Ethernet header */
+	if (skb_cow_head(skb, ETH_HLEN) < 0)
+		return -ENOMEM;
+
+	skb_push(skb, ETH_HLEN);
+	skb_reset_mac_header(skb);
+	skb->mac_len = ETH_HLEN;
+
+	hdr = eth_hdr(skb);
+	ether_addr_copy(hdr->h_source, ethh->addresses.eth_src);
+	ether_addr_copy(hdr->h_dest, ethh->addresses.eth_dst);
+	hdr->h_proto = skb->protocol;
+
+	skb_postpush_rcsum(skb, hdr, ETH_HLEN);
+
+	key->phy.is_layer3 = false;
+	invalidate_flow_key(key);
 	return 0;
 }
 
@@ -752,6 +808,9 @@ static void do_output(struct datapath *dp, struct sk_buff *skb, int out_port,
 		u16 mru = OVS_CB(skb)->mru;
 		u32 cutlen = OVS_CB(skb)->cutlen;
 
+		if (vport->dev->type == ARPHRD_NONE && !key->phy.is_layer3)
+			skb->protocol = htons(ETH_P_TEB);
+
 		if (unlikely(cutlen > 0)) {
 			if (skb->len - cutlen > ETH_HLEN)
 				pskb_trim(skb, skb->len - cutlen);
@@ -1113,6 +1172,14 @@ static int do_execute_actions(struct datapath *dp, struct sk_buff *skb,
 
 		case OVS_ACTION_ATTR_POP_VLAN:
 			err = pop_vlan(skb, key);
+			break;
+
+		case OVS_ACTION_ATTR_PUSH_ETH:
+			err = push_eth(skb, key, nla_data(a));
+			break;
+
+		case OVS_ACTION_ATTR_POP_ETH:
+			err = pop_eth(skb, key);
 			break;
 
 		case OVS_ACTION_ATTR_RECIRC:

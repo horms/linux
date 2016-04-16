@@ -123,7 +123,7 @@ static void update_range(struct sw_flow_match *match,
 static bool match_validate(const struct sw_flow_match *match,
 			   u64 key_attrs, u64 mask_attrs, bool log)
 {
-	u64 key_expected = 1 << OVS_KEY_ATTR_ETHERNET;
+	u64 key_expected = 0;
 	u64 mask_allowed = key_attrs;  /* At most allow all key attributes */
 
 	/* The following mask attributes allowed only if they
@@ -812,6 +812,8 @@ static int metadata_from_nlattrs(struct net *net, struct sw_flow_match *match,
 				 u64 *attrs, const struct nlattr **a,
 				 bool is_mask, bool log)
 {
+	bool is_layer3 = false;
+
 	if (*attrs & (1 << OVS_KEY_ATTR_DP_HASH)) {
 		u32 hash_val = nla_get_u32(a[OVS_KEY_ATTR_DP_HASH]);
 
@@ -898,48 +900,13 @@ static int metadata_from_nlattrs(struct net *net, struct sw_flow_match *match,
 				   sizeof(*cl), is_mask);
 		*attrs &= ~(1ULL << OVS_KEY_ATTR_CT_LABELS);
 	}
-	return 0;
-}
 
-static int ovs_key_from_nlattrs(struct net *net, struct sw_flow_match *match,
-				u64 attrs, const struct nlattr **a,
-				bool is_mask, bool log)
-{
-	int err;
-
-	err = metadata_from_nlattrs(net, match, &attrs, a, is_mask, log);
-	if (err)
-		return err;
-
-	if (attrs & (1 << OVS_KEY_ATTR_ETHERNET)) {
-		const struct ovs_key_ethernet *eth_key;
-
-		eth_key = nla_data(a[OVS_KEY_ATTR_ETHERNET]);
-		SW_FLOW_KEY_MEMCPY(match, eth.src,
-				eth_key->eth_src, ETH_ALEN, is_mask);
-		SW_FLOW_KEY_MEMCPY(match, eth.dst,
-				eth_key->eth_dst, ETH_ALEN, is_mask);
-		attrs &= ~(1 << OVS_KEY_ATTR_ETHERNET);
-	}
-
-	if (attrs & (1 << OVS_KEY_ATTR_VLAN)) {
-		__be16 tci;
-
-		tci = nla_get_be16(a[OVS_KEY_ATTR_VLAN]);
-		if (!(tci & htons(VLAN_TAG_PRESENT))) {
-			if (is_mask)
-				OVS_NLERR(log, "VLAN TCI mask does not have exact match for VLAN_TAG_PRESENT bit.");
-			else
-				OVS_NLERR(log, "VLAN TCI does not have VLAN_TAG_PRESENT bit set.");
-
-			return -EINVAL;
-		}
-
-		SW_FLOW_KEY_PUT(match, eth.tci, tci, is_mask);
-		attrs &= ~(1 << OVS_KEY_ATTR_VLAN);
-	}
-
-	if (attrs & (1 << OVS_KEY_ATTR_ETHERTYPE)) {
+	/* For layer 3 packets the ethernet type is provided
+	 * and treated as metadata but no MAC addresses are provided.
+	 * For layer 2 packets it is not metadata but can be processed
+	 * here anyway.
+	 */
+	if (*attrs & (1ULL << OVS_KEY_ATTR_ETHERTYPE)) {
 		__be16 eth_type;
 
 		eth_type = nla_get_be16(a[OVS_KEY_ATTR_ETHERTYPE]);
@@ -953,9 +920,71 @@ static int ovs_key_from_nlattrs(struct net *net, struct sw_flow_match *match,
 		}
 
 		SW_FLOW_KEY_PUT(match, eth.type, eth_type, is_mask);
-		attrs &= ~(1 << OVS_KEY_ATTR_ETHERTYPE);
+		*attrs &= ~(1 << OVS_KEY_ATTR_ETHERTYPE);
+
+		if (!(*attrs & (1 << OVS_KEY_ATTR_ETHERNET)))
+			is_layer3 = true;
 	} else if (!is_mask) {
 		SW_FLOW_KEY_PUT(match, eth.type, htons(ETH_P_802_2), is_mask);
+	}
+
+	/* Always exact match is_layer3 */
+	SW_FLOW_KEY_PUT(match, phy.is_layer3, is_mask ? true : is_layer3,
+			is_mask);
+	return is_layer3;
+}
+
+static int l2_from_nlattrs(struct net *net, struct sw_flow_match *match,
+			   u64 *attrs, const struct nlattr **a,
+			   bool is_mask, bool log)
+{
+	if (*attrs & (1 << OVS_KEY_ATTR_ETHERNET)) {
+		const struct ovs_key_ethernet *eth_key;
+
+		eth_key = nla_data(a[OVS_KEY_ATTR_ETHERNET]);
+		SW_FLOW_KEY_MEMCPY(match, eth.src,
+				eth_key->eth_src, ETH_ALEN, is_mask);
+		SW_FLOW_KEY_MEMCPY(match, eth.dst,
+				eth_key->eth_dst, ETH_ALEN, is_mask);
+		*attrs &= ~(1 << OVS_KEY_ATTR_ETHERNET);
+	}
+
+	if (*attrs & (1 << OVS_KEY_ATTR_VLAN)) {
+		__be16 tci;
+
+		tci = nla_get_be16(a[OVS_KEY_ATTR_VLAN]);
+		if (!(tci & htons(VLAN_TAG_PRESENT))) {
+			if (is_mask)
+				OVS_NLERR(log, "VLAN TCI mask does not have exact match for VLAN_TAG_PRESENT bit.");
+			else
+				OVS_NLERR(log, "VLAN TCI does not have VLAN_TAG_PRESENT bit set.");
+
+			return -EINVAL;
+		}
+
+		SW_FLOW_KEY_PUT(match, eth.tci, tci, is_mask);
+		*attrs &= ~(1 << OVS_KEY_ATTR_VLAN);
+	}
+
+	return 0;
+}
+
+static int ovs_key_from_nlattrs(struct net *net, struct sw_flow_match *match,
+				u64 attrs, const struct nlattr **a,
+				bool is_mask, bool log)
+{
+	int err;
+	bool is_layer3;
+
+	err = metadata_from_nlattrs(net, match, &attrs, a, is_mask, log);
+	if (err < 0)
+		return err;
+	is_layer3 = err != 0;
+
+	if (!is_layer3) {
+		err = l2_from_nlattrs(net, match, &attrs, a, is_mask, log);
+		if (err < 0)
+			return err;
 	}
 
 	if (attrs & (1 << OVS_KEY_ATTR_IPV4)) {
@@ -1407,7 +1436,11 @@ int ovs_nla_get_flow_metadata(struct net *net, const struct nlattr *attr,
 	memset(&key->ct, 0, sizeof(key->ct));
 	key->phy.in_port = DP_MAX_PORTS;
 
-	return metadata_from_nlattrs(net, &match, &attrs, a, false, log);
+	err = metadata_from_nlattrs(net, &match, &attrs, a, false, log);
+	if (err < 0)
+		return err;
+
+	return 0;
 }
 
 static int __ovs_nla_put_key(const struct sw_flow_key *swkey,
@@ -1415,7 +1448,7 @@ static int __ovs_nla_put_key(const struct sw_flow_key *swkey,
 			     struct sk_buff *skb)
 {
 	struct ovs_key_ethernet *eth_key;
-	struct nlattr *nla, *encap;
+	struct nlattr *nla, *encap = NULL;
 
 	if (nla_put_u32(skb, OVS_KEY_ATTR_RECIRC_ID, output->recirc_id))
 		goto nla_put_failure;
@@ -1456,38 +1489,40 @@ static int __ovs_nla_put_key(const struct sw_flow_key *swkey,
 	if (ovs_ct_put_key(output, skb))
 		goto nla_put_failure;
 
-	nla = nla_reserve(skb, OVS_KEY_ATTR_ETHERNET, sizeof(*eth_key));
-	if (!nla)
-		goto nla_put_failure;
-
-	eth_key = nla_data(nla);
-	ether_addr_copy(eth_key->eth_src, output->eth.src);
-	ether_addr_copy(eth_key->eth_dst, output->eth.dst);
-
-	if (swkey->eth.tci || swkey->eth.type == htons(ETH_P_8021Q)) {
-		__be16 eth_type;
-		eth_type = !is_mask ? htons(ETH_P_8021Q) : htons(0xffff);
-		if (nla_put_be16(skb, OVS_KEY_ATTR_ETHERTYPE, eth_type) ||
-		    nla_put_be16(skb, OVS_KEY_ATTR_VLAN, output->eth.tci))
+	if (!swkey->phy.is_layer3) {
+		nla = nla_reserve(skb, OVS_KEY_ATTR_ETHERNET, sizeof(*eth_key));
+		if (!nla)
 			goto nla_put_failure;
-		encap = nla_nest_start(skb, OVS_KEY_ATTR_ENCAP);
-		if (!swkey->eth.tci)
-			goto unencap;
-	} else
-		encap = NULL;
 
-	if (swkey->eth.type == htons(ETH_P_802_2)) {
-		/*
-		 * Ethertype 802.2 is represented in the netlink with omitted
-		 * OVS_KEY_ATTR_ETHERTYPE in the flow key attribute, and
-		 * 0xffff in the mask attribute.  Ethertype can also
-		 * be wildcarded.
-		 */
-		if (is_mask && output->eth.type)
-			if (nla_put_be16(skb, OVS_KEY_ATTR_ETHERTYPE,
-						output->eth.type))
+		eth_key = nla_data(nla);
+		ether_addr_copy(eth_key->eth_src, output->eth.src);
+		ether_addr_copy(eth_key->eth_dst, output->eth.dst);
+
+		if (swkey->eth.tci || swkey->eth.type == htons(ETH_P_8021Q)) {
+			__be16 eth_type;
+			eth_type = !is_mask ? htons(ETH_P_8021Q) : htons(0xffff);
+			if (nla_put_be16(skb, OVS_KEY_ATTR_ETHERTYPE, eth_type) ||
+			    nla_put_be16(skb, OVS_KEY_ATTR_VLAN,
+					 output->eth.tci))
 				goto nla_put_failure;
-		goto unencap;
+			encap = nla_nest_start(skb, OVS_KEY_ATTR_ENCAP);
+			if (!swkey->eth.tci)
+				goto unencap;
+		}
+
+		if (swkey->eth.type == htons(ETH_P_802_2)) {
+			/*
+			 * Ethertype 802.2 is represented in the netlink
+			 * with omitted OVS_KEY_ATTR_ETHERTYPE in the flow
+			 * key attribute, and 0xffff in the mask attribute.
+			 * Ethertype can also be wildcarded.
+			 */
+			if (is_mask && output->eth.type)
+				if (nla_put_be16(skb, OVS_KEY_ATTR_ETHERTYPE,
+						 output->eth.type))
+					goto nla_put_failure;
+			goto unencap;
+		}
 	}
 
 	if (nla_put_be16(skb, OVS_KEY_ATTR_ETHERTYPE, output->eth.type))
@@ -2010,8 +2045,8 @@ static bool validate_masked(u8 *data, int len)
 
 static int validate_set(const struct nlattr *a,
 			const struct sw_flow_key *flow_key,
-			struct sw_flow_actions **sfa,
-			bool *skip_copy, __be16 eth_type, bool masked, bool log)
+			struct sw_flow_actions **sfa, bool *skip_copy,
+			__be16 eth_type, bool masked, bool log, bool is_layer3)
 {
 	const struct nlattr *ovs_key = nla_data(a);
 	int key_type = nla_type(ovs_key);
@@ -2041,7 +2076,11 @@ static int validate_set(const struct nlattr *a,
 	case OVS_KEY_ATTR_SKB_MARK:
 	case OVS_KEY_ATTR_CT_MARK:
 	case OVS_KEY_ATTR_CT_LABELS:
+		break;
+
 	case OVS_KEY_ATTR_ETHERNET:
+		if (is_layer3)
+			return -EINVAL;
 		break;
 
 	case OVS_KEY_ATTR_TUNNEL:
@@ -2208,6 +2247,7 @@ static int __ovs_nla_copy_actions(struct net *net, const struct nlattr *attr,
 				  int depth, struct sw_flow_actions **sfa,
 				  __be16 eth_type, __be16 vlan_tci, bool log)
 {
+	bool is_layer3 = key->phy.is_layer3;
 	const struct nlattr *a;
 	int rem, err;
 
@@ -2230,6 +2270,8 @@ static int __ovs_nla_copy_actions(struct net *net, const struct nlattr *attr,
 			[OVS_ACTION_ATTR_HASH] = sizeof(struct ovs_action_hash),
 			[OVS_ACTION_ATTR_CT] = (u32)-1,
 			[OVS_ACTION_ATTR_TRUNC] = sizeof(struct ovs_action_trunc),
+			[OVS_ACTION_ATTR_PUSH_ETH] = sizeof(struct ovs_action_push_eth),
+			[OVS_ACTION_ATTR_POP_ETH] = 0,
 		};
 		const struct ovs_action_push_vlan *vlan;
 		int type = nla_type(a);
@@ -2278,10 +2320,14 @@ static int __ovs_nla_copy_actions(struct net *net, const struct nlattr *attr,
 		}
 
 		case OVS_ACTION_ATTR_POP_VLAN:
+			if (is_layer3)
+				return -EINVAL;
 			vlan_tci = htons(0);
 			break;
 
 		case OVS_ACTION_ATTR_PUSH_VLAN:
+			if (is_layer3)
+				return -EINVAL;
 			vlan = nla_data(a);
 			if (vlan->vlan_tpid != htons(ETH_P_8021Q))
 				return -EINVAL;
@@ -2331,14 +2377,16 @@ static int __ovs_nla_copy_actions(struct net *net, const struct nlattr *attr,
 
 		case OVS_ACTION_ATTR_SET:
 			err = validate_set(a, key, sfa,
-					   &skip_copy, eth_type, false, log);
+					   &skip_copy, eth_type, false, log,
+					   is_layer3);
 			if (err)
 				return err;
 			break;
 
 		case OVS_ACTION_ATTR_SET_MASKED:
 			err = validate_set(a, key, sfa,
-					   &skip_copy, eth_type, true, log);
+					   &skip_copy, eth_type, true, log,
+					   is_layer3);
 			if (err)
 				return err;
 			break;
@@ -2356,6 +2404,22 @@ static int __ovs_nla_copy_actions(struct net *net, const struct nlattr *attr,
 			if (err)
 				return err;
 			skip_copy = true;
+			break;
+
+		case OVS_ACTION_ATTR_POP_ETH:
+			if (is_layer3)
+				return -EINVAL;
+			if (vlan_tci & htons(VLAN_TAG_PRESENT))
+				return -EINVAL;
+			is_layer3 = true;
+			break;
+
+		case OVS_ACTION_ATTR_PUSH_ETH:
+			/* For now disallow pushing an Ethernet header if one
+			 * is already present */
+			if (!is_layer3)
+				return -EINVAL;
+			is_layer3 = false;
 			break;
 
 		default:

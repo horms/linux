@@ -448,7 +448,7 @@ invalid:
  *
  * Initializes @skb header pointers as follows:
  *
- *    - skb->mac_header: the Ethernet header.
+ *    - skb->mac_header: the Ethernet header if flow is L2, unset otherwise
  *
  *    - skb->network_header: just past the Ethernet header, or just past the
  *      VLAN header, to the first byte of the Ethernet payload.
@@ -461,39 +461,45 @@ invalid:
 static int key_extract(struct sk_buff *skb, struct sw_flow_key *key)
 {
 	int error;
-	struct ethhdr *eth;
 
 	/* Flags are always used as part of stats */
 	key->tp.flags = 0;
 
-	skb_reset_mac_header(skb);
-
-	/* Link layer.  We are guaranteed to have at least the 14 byte Ethernet
-	 * header in the linear data area.
-	 */
-	eth = eth_hdr(skb);
-	ether_addr_copy(key->eth.src, eth->h_source);
-	ether_addr_copy(key->eth.dst, eth->h_dest);
-
-	__skb_pull(skb, 2 * ETH_ALEN);
-	/* We are going to push all headers that we pull, so no need to
-	 * update skb->csum here.
-	 */
-
+	/* Link layer. */
 	key->eth.tci = 0;
-	if (skb_vlan_tag_present(skb))
-		key->eth.tci = htons(skb->vlan_tci);
-	else if (eth->h_proto == htons(ETH_P_8021Q))
-		if (unlikely(parse_vlan(skb, key)))
+	if (key->phy.is_layer3) {
+		if (skb_vlan_tag_present(skb))
+			key->eth.tci = htons(skb->vlan_tci);
+		key->eth.type = skb->protocol;
+		skb_reset_network_header(skb);
+	} else {
+		struct ethhdr *eth;
+
+		skb_reset_mac_header(skb);
+
+		eth = eth_hdr(skb);
+		ether_addr_copy(key->eth.src, eth->h_source);
+		ether_addr_copy(key->eth.dst, eth->h_dest);
+
+		__skb_pull(skb, 2 * ETH_ALEN);
+		/* We are going to push all headers that we pull, so no need to
+		 * update skb->csum here.
+		 */
+
+		if (skb_vlan_tag_present(skb))
+			key->eth.tci = htons(skb->vlan_tci);
+		else if (eth->h_proto == htons(ETH_P_8021Q))
+			if (unlikely(parse_vlan(skb, key)))
+				return -ENOMEM;
+
+		key->eth.type = parse_ethertype(skb);
+		if (unlikely(key->eth.type == htons(0)))
 			return -ENOMEM;
 
-	key->eth.type = parse_ethertype(skb);
-	if (unlikely(key->eth.type == htons(0)))
-		return -ENOMEM;
-
-	skb_reset_network_header(skb);
-	skb_reset_mac_len(skb);
-	__skb_push(skb, skb->data - skb_mac_header(skb));
+		skb_reset_network_header(skb);
+		skb_reset_mac_len(skb);
+		__skb_push(skb, skb->data - skb_mac_header(skb));
+	}
 
 	/* Network layer. */
 	if (key->eth.type == htons(ETH_P_IP)) {
@@ -604,12 +610,16 @@ static int key_extract(struct sk_buff *skb, struct sw_flow_key *key)
 		 * header and the beginning of the L3 header differ.
 		 *
 		 * Advance network_header to the beginning of the L3
-		 * header. mac_len corresponds to the end of the L2 header.
+		 * header. For packets with an L2 header mac_len corresponds
+		 * to the end of the L2 header.
 		 */
 		while (1) {
+			__u16 mac_len;
 			__be32 lse;
 
-			error = check_header(skb, skb->mac_len + stack_len);
+			mac_len = key->phy.is_layer3 ? 0 : skb->mac_len;
+
+			error = check_header(skb, mac_len + stack_len);
 			if (unlikely(error))
 				return 0;
 
@@ -618,7 +628,7 @@ static int key_extract(struct sk_buff *skb, struct sw_flow_key *key)
 			if (stack_len == MPLS_HLEN)
 				memcpy(&key->mpls.top_lse, &lse, MPLS_HLEN);
 
-			skb_set_network_header(skb, skb->mac_len + stack_len);
+			skb_set_network_header(skb, mac_len + stack_len);
 			if (lse & htonl(MPLS_LS_S_MASK))
 				break;
 
@@ -696,6 +706,8 @@ int ovs_flow_key_update(struct sk_buff *skb, struct sw_flow_key *key)
 int ovs_flow_key_extract(const struct ip_tunnel_info *tun_info,
 			 struct sk_buff *skb, struct sw_flow_key *key)
 {
+	int err;
+
 	/* Extract metadata from packet. */
 	if (tun_info) {
 		key->tun_proto = ip_tunnel_info_af(tun_info);
@@ -723,9 +735,17 @@ int ovs_flow_key_extract(const struct ip_tunnel_info *tun_info,
 	key->phy.skb_mark = skb->mark;
 	ovs_ct_fill_key(skb, key);
 	key->ovs_flow_hash = 0;
+	key->phy.is_layer3 = !skb_eth_header_present(skb);
 	key->recirc_id = 0;
 
-	return key_extract(skb, key);
+	err = key_extract(skb, key);
+	if (err < 0)
+		return err;
+
+	if (tun_info && skb->protocol == htons(ETH_P_TEB))
+		skb->protocol = key->eth.type;
+
+	return err;
 }
 
 int ovs_flow_key_extract_userspace(struct net *net, const struct nlattr *attr,
@@ -740,6 +760,15 @@ int ovs_flow_key_extract_userspace(struct net *net, const struct nlattr *attr,
 	err = ovs_nla_get_flow_metadata(net, attr, key, log);
 	if (err)
 		return err;
+
+	/* key_extract assumes that skb->protocol is set-up for
+	 * layer 3 packets which is the case for other callers,
+	 * in particular packets recieved from the network stack.
+	 * Here the correct value can be set from the metadata
+	 * extracted above.
+	 */
+	if (key->phy.is_layer3)
+		skb->protocol = key->eth.type;
 
 	return key_extract(skb, key);
 }

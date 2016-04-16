@@ -4883,3 +4883,11 @@ struct sk_buff *pskb_extract(struct sk_buff *skb, int off,
 	return clone;
 }
 EXPORT_SYMBOL(pskb_extract);
+
+bool skb_eth_header_present(struct sk_buff *skb)
+{
+	return skb->dev->type == ARPHRD_ETHER ||
+		(skb->dev->type == ARPHRD_NONE &&
+		 skb->protocol == htons(ETH_P_TEB));
+}
+EXPORT_SYMBOL(skb_eth_header_present);
