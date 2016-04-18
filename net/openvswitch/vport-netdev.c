@@ -60,7 +60,24 @@ static void netdev_port_receive(struct sk_buff *skb)
 	if (vport->dev->type == ARPHRD_ETHER) {
 		skb_push(skb, ETH_HLEN);
 		skb_postpush_rcsum(skb, skb->data, ETH_HLEN);
+	} else if (vport->dev->type == ARPHRD_NONE) {
+		if (skb->protocol == htons(ETH_P_TEB)) {
+			__be16 eth_type;
+
+			if (unlikely(skb->len < ETH_HLEN))
+				goto error;
+
+			eth_type = eth_type_trans(skb, skb->dev);
+			skb->mac_len = skb->data - skb_mac_header(skb);
+			__skb_push(skb, skb->mac_len);
+
+			if (eth_type == htons(ETH_P_8021Q))
+				skb->mac_len += VLAN_HLEN;
+		} else {
+			skb->mac_len = 0;
+		}
 	}
+
 	ovs_vport_receive(vport, skb, skb_tunnel_info(skb));
 	return;
 error:
@@ -99,7 +116,8 @@ struct vport *ovs_netdev_link(struct vport *vport, const char *name)
 	}
 
 	if (vport->dev->flags & IFF_LOOPBACK ||
-	    vport->dev->type != ARPHRD_ETHER ||
+	    (vport->dev->type != ARPHRD_ETHER &&
+	     vport->dev->type != ARPHRD_NONE) ||
 	    ovs_is_internal_dev(vport->dev)) {
 		err = -EINVAL;
 		goto error_put;
@@ -198,12 +216,16 @@ EXPORT_SYMBOL_GPL(ovs_netdev_tunnel_destroy);
 
 int ovs_netdev_send(struct sk_buff *skb)
 {
-	/* Only send L2 packets */
-	if (skb->mac_len)
-		return dev_queue_xmit(skb);
+	struct net_device *dev = skb->dev;
 
-	kfree_skb(skb);
-	return -EINVAL;
+	if (dev->type != ARPHRD_ETHER && skb->mac_len) {
+		skb->protocol = htons(ETH_P_TEB);
+	} else if (dev->type == ARPHRD_ETHER && !skb->mac_len) {
+		kfree_skb(skb);
+		return -EINVAL;
+	}
+
+	return dev_queue_xmit(skb);
 }
 EXPORT_SYMBOL_GPL(ovs_netdev_send);
 

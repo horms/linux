@@ -1116,8 +1116,8 @@ static struct rtnl_link_ops ipgre_tap_ops __read_mostly = {
 	.get_link_net	= ip_tunnel_get_link_net,
 };
 
-struct net_device *gretap_fb_dev_create(struct net *net, const char *name,
-					u8 name_assign_type)
+struct net_device *gre_fb_dev_create(struct net *net, const char *name,
+				     u8 name_assign_type)
 {
 	struct nlattr *tb[IFLA_MAX + 1];
 	struct net_device *dev;
@@ -1127,13 +1127,14 @@ struct net_device *gretap_fb_dev_create(struct net *net, const char *name,
 	memset(&tb, 0, sizeof(tb));
 
 	dev = rtnl_create_link(net, name, name_assign_type,
-			       &ipgre_tap_ops, tb);
+			       &ipgre_link_ops, tb);
 	if (IS_ERR(dev))
 		return dev;
 
 	/* Configure flow based GRE device. */
 	t = netdev_priv(dev);
 	t->collect_md = true;
+	dev->type = ARPHRD_NONE;
 
 	err = ipgre_newlink(net, dev, tb, NULL);
 	if (err < 0)
@@ -1151,7 +1152,7 @@ out:
 	free_netdev(dev);
 	return ERR_PTR(err);
 }
-EXPORT_SYMBOL_GPL(gretap_fb_dev_create);
+EXPORT_SYMBOL_GPL(gre_fb_dev_create);
 
 static int __net_init ipgre_tap_init_net(struct net *net)
 {
