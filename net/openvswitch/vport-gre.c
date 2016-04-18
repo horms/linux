@@ -60,7 +60,7 @@ static struct vport *gre_tnl_create(const struct vport_parms *parms)
 		return vport;
 
 	rtnl_lock();
-	dev = gretap_fb_dev_create(net, parms->name, NET_NAME_USER);
+	dev = gre_fb_dev_create(net, parms->name, NET_NAME_USER);
 	if (IS_ERR(dev)) {
 		rtnl_unlock();
 		ovs_vport_free(vport);
