@@ -60,7 +60,7 @@ static struct vport *gre_tnl_create(const struct vport_parms *parms)
 		return vport;
 
 	rtnl_lock();
-	dev = gretap_fb_dev_create(net, parms->name, NET_NAME_USER);
+	dev = gre_fb_dev_create(net, parms->name, NET_NAME_USER);
 	if (IS_ERR(dev)) {
 		rtnl_unlock();
 		ovs_vport_free(vport);
@@ -87,7 +87,7 @@ static struct vport *gre_create(const struct vport_parms *parms)
 static struct vport_ops ovs_gre_vport_ops = {
 	.type		= OVS_VPORT_TYPE_GRE,
 	.create		= gre_create,
-	.send		= ovs_netdev_send_tap,
+	.send		= ovs_netdev_send_raw_tun,
 	.destroy	= ovs_netdev_tunnel_destroy,
 };
 
