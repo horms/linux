@@ -729,7 +729,7 @@ int ovs_flow_key_extract(const struct ip_tunnel_info *tun_info,
 	key->phy.skb_mark = skb->mark;
 	ovs_ct_fill_key(skb, key);
 	key->ovs_flow_hash = 0;
-	key->phy.is_layer3 = skb->mac_len == 0;
+	key->phy.is_layer3 = skb_mac_header_was_set(skb) == 0;
 	key->recirc_id = 0;
 
 	err = key_extract(skb, key);
