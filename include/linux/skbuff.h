@@ -2994,6 +2994,7 @@ int skb_vlan_pop(struct sk_buff *skb);
 int skb_vlan_push(struct sk_buff *skb, __be16 vlan_proto, u16 vlan_tci);
 struct sk_buff *pskb_extract(struct sk_buff *skb, int off, int to_copy,
 			     gfp_t gfp);
+int skb_vlan_accel(struct sk_buff *skb);
 
 static inline int memcpy_from_msg(void *data, struct msghdr *msg, int len)
 {

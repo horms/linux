@@ -4485,10 +4485,26 @@ pull:
 	return err;
 }
 
-int skb_vlan_pop(struct sk_buff *skb)
+/* Move vlan tag from packet to hw accel tag */
+int skb_vlan_accel(struct sk_buff *skb)
 {
 	u16 vlan_tci;
 	__be16 vlan_proto;
+	int err;
+
+	vlan_proto = skb->protocol;
+	err = __skb_vlan_pop(skb, &vlan_tci);
+	if (unlikely(err))
+		return err;
+
+	__vlan_hwaccel_put_tag(skb, vlan_proto, vlan_tci);
+	return 0;
+}
+EXPORT_SYMBOL(skb_vlan_accel);
+
+int skb_vlan_pop(struct sk_buff *skb)
+{
+	u16 vlan_tci;
 	int err;
 
 	if (likely(skb_vlan_tag_present(skb))) {
@@ -4503,19 +4519,13 @@ int skb_vlan_pop(struct sk_buff *skb)
 		if (err)
 			return err;
 	}
-	/* move next vlan tag to hw accel tag */
+
 	if (likely((skb->protocol != htons(ETH_P_8021Q) &&
 		    skb->protocol != htons(ETH_P_8021AD)) ||
 		   skb->len < VLAN_ETH_HLEN))
 		return 0;
 
-	vlan_proto = skb->protocol;
-	err = __skb_vlan_pop(skb, &vlan_tci);
-	if (unlikely(err))
-		return err;
-
-	__vlan_hwaccel_put_tag(skb, vlan_proto, vlan_tci);
-	return 0;
+	return skb_vlan_accel(skb);
 }
 EXPORT_SYMBOL(skb_vlan_pop);
 
