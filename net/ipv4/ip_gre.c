@@ -283,6 +283,8 @@ static int __ipgre_rcv(struct sk_buff *skb, const struct tnl_ptk_info *tpi,
 
 		if (tunnel->dev->type != ARPHRD_NONE)
 			skb_pop_mac_header(skb);
+		else if (tpi->proto != htons(ETH_P_TEB))
+			skb_unset_mac_header(skb);
 		else
 			skb_reset_mac_header(skb);
 		if (tunnel->collect_md) {
