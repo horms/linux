@@ -2170,6 +2170,11 @@ static inline void skb_reset_mac_header(struct sk_buff *skb)
 	skb->mac_header = skb->data - skb->head;
 }
 
+static inline void skb_unset_mac_header(struct sk_buff *skb)
+{
+	skb->mac_header = (typeof(skb->mac_header))~0U;
+}
+
 static inline void skb_set_mac_header(struct sk_buff *skb, const int offset)
 {
 	skb_reset_mac_header(skb);
