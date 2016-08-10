@@ -451,6 +451,7 @@ static void gre_fb_xmit(struct sk_buff *skb, struct net_device *dev,
 
 	df = key->tun_flags & TUNNEL_DONT_FRAGMENT ?  htons(IP_DF) : 0;
 
+	skb_set_inner_protocol(skb, proto);
 	iptunnel_xmit(skb->sk, rt, skb, fl.saddr, key->u.ipv4.dst, IPPROTO_GRE,
 		      key->tos, key->ttl, df, false);
 	return;
