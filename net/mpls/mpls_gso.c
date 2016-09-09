@@ -39,15 +39,17 @@ static struct sk_buff *mpls_gso_segment(struct sk_buff *skb,
 	mpls_features = skb->dev->mpls_features & features;
 	segs = skb_mac_gso_segment(skb, mpls_features);
 
-
-	/* Restore outer protocol. */
-	skb->protocol = mpls_protocol;
-
 	/* Re-pull the mac header that the call to skb_mac_gso_segment()
 	 * above pulled.  It will be re-pushed after returning
 	 * skb_mac_gso_segment(), an indirect caller of this function.
 	 */
 	__skb_pull(skb, skb->data - skb_mac_header(skb));
+
+	/* Restore outer protocol. */
+	skb->protocol = mpls_protocol;
+	if (!IS_ERR_OR_NULL(segs))
+		for (skb = segs; skb; skb = skb->next)
+			skb->protocol = mpls_protocol;
 
 	return segs;
 }
