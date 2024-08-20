@@ -137,6 +137,9 @@ Users may also set the IPsec packet capability of the function using
 Users may also set the maximum IO event queues of the function
 using `devlink port function set max_io_eqs` command.
 
+Users may also set the header split capability of the function using
+using `devlink port function set header_split` command.
+
 Function attributes
 ===================
 
@@ -327,6 +330,36 @@ interrupt vector.
     pci/0000:06:00.0/2: type eth netdev enp6s0pf0vf1 flavour pcivf pfnum 0 vfnum 1
         function:
             hw_addr 00:00:00:00:00:00 ipsec_packet disabled max_io_eqs 32
+
+Header Split capability setup
+-----------------------------
+When user enables the header split packet capability for a VF, the function
+is configured to place frame headers and data into separate buffers.
+
+When header split packet capability is disabled for a VF (it is enabled by
+default), the function does not place frame headers and data into separate
+buffers.
+
+Enabling this option facilitates page-flipping TCP zero-copy receive
+(``getsockopt(TCP_ZEROCOPY_RECEIVE)``). In order to use that feature,
+further device configuration must make it possible to receive full memory
+pages of data, for example an MTU that is high enough or via HW-GRO.
+
+- Get header split capability of the VF device::
+
+    $ devlink port show pci/0000:06:00.0/2
+    pci/0000:06:00.0/2: type eth netdev enp6s0pf0vf1 flavour pcivf pfnum 0 vfnum 1
+        function:
+            hw_addr 00:00:00:00:00:00 header_split enable
+
+- Set header split capability of the VF device::
+
+    $ devlink port function set pci/0000:06:00.0/2 header_split disable
+
+    $ devlink port show pci/0000:06:00.0/2
+    pci/0000:06:00.0/2: type eth netdev enp6s0pf0vf1 flavour pcivf pfnum 0 vfnum 1
+        function:
+            hw_addr 00:00:00:00:00:00 header_split disable
 
 Subfunction
 ============
