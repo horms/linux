@@ -75,6 +75,8 @@ definitions:
         name: ipsec-crypto-bit
       -
         name: ipsec-packet-bit
+      -
+        name: header-split-bit
   -
     type: enum
     name: rate-type
