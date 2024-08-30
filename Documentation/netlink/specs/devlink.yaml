@@ -77,6 +77,8 @@ definitions:
         name: ipsec-packet-bit
       -
         name: header-split-bit
+      -
+        name: gro-hw-bit
   -
     type: enum
     name: rate-type

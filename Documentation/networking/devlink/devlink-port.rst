@@ -140,6 +140,9 @@ using `devlink port function set max_io_eqs` command.
 Users may also set the header split capability of the function using
 using `devlink port function set header_split` command.
 
+Users may also set the hardware GRO capability of the function using
+using `devlink port function set gro` command.
+
 Function attributes
 ===================
 
@@ -360,6 +363,38 @@ pages of data, for example an MTU that is high enough or via HW-GRO.
     pci/0000:06:00.0/2: type eth netdev enp6s0pf0vf1 flavour pcivf pfnum 0 vfnum 1
         function:
             hw_addr 00:00:00:00:00:00 header_split disable
+
+Hardware GRO capability setup
+-----------------------------
+When user enables the hardware GRO (generic receive offload) packet
+capability for a VF, the function allows the driver to enable hardware GRO.
+
+Conversely, when hardware GRO capability is disabled for a VF (it is
+enabled by default), the function does not allow the driver to enable
+hardware GRO.
+
+When hardware GRO is enabled the NIC will coalesce packets and pass them as
+a coalesced units to the driver. The coalesced packet stream is
+re-segmentable by GSO or TSO back to the exact original packet stream.
+
+For information on driver-level configuration of hardware GRO may be
+controlled using ethtool.
+
+- Get hardware GRO capability of the VF device::
+
+    $ devlink port show pci/0000:06:00.0/2
+    pci/0000:06:00.0/2: type eth netdev enp6s0pf0vf1 flavour pcivf pfnum 0 vfnum 1
+        function:
+            hw_addr 00:00:00:00:00:00 gro enable
+
+- Set hardware GRO capability of the VF device::
+
+    $ devlink port function set pci/0000:06:00.0/2 gro disable
+
+    $ devlink port show pci/0000:06:00.0/2
+    pci/0000:06:00.0/2: type eth netdev enp6s0pf0vf1 flavour pcivf pfnum 0 vfnum 1
+        function:
+            hw_addr 00:00:00:00:00:00 ipsec_packet disable
 
 Subfunction
 ============
