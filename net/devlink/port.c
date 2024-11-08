@@ -196,6 +196,30 @@ static int devlink_port_fn_rx_gro_hw_fill(struct devlink_port *devlink_port,
 	return 0;
 }
 
+static int devlink_port_fn_max_sf_fill(struct devlink_port *devlink_port,
+				       struct nla_bitfield32 *caps,
+				       struct netlink_ext_ack *extack)
+{
+	bool is_enable;
+	int err;
+
+	if (!devlink_port->ops->port_fn_max_sf_get ||
+	    devlink_port->attrs.flavour != DEVLINK_PORT_FLAVOUR_PCI_PF)
+		return 0;
+
+	err = devlink_port->ops->port_fn_max_sf_get(devlink_port, &is_enable,
+						    extack);
+	if (err) {
+		if (err == -EOPNOTSUPP)
+			return 0;
+		return err;
+	}
+
+	devlink_port_fn_cap_fill(caps, DEVLINK_PORT_FN_CAP_HEADER_SPLIT,
+				 is_enable);
+	return 0;
+}
+
 static int devlink_port_fn_caps_fill(struct devlink_port *devlink_port,
 				     struct sk_buff *msg,
 				     struct netlink_ext_ack *extack,
@@ -225,6 +249,10 @@ static int devlink_port_fn_caps_fill(struct devlink_port *devlink_port,
 		return err;
 
 	err = devlink_port_fn_rx_gro_hw_fill(devlink_port, &caps, extack);
+	if (err)
+		return err;
+
+	err = devlink_port_fn_max_sf_fill(devlink_port, &caps, extack);
 	if (err)
 		return err;
 
@@ -465,6 +493,14 @@ devlink_port_fn_rx_gro_hw_set(struct devlink_port *devlink_port, bool enable,
 							extack);
 }
 
+static int
+devlink_port_fn_max_sf_set(struct devlink_port *devlink_port, bool enable,
+			   struct netlink_ext_ack *extack)
+{
+	return devlink_port->ops->port_fn_max_sf_set(devlink_port, enable,
+						     extack);
+}
+
 static int devlink_port_fn_caps_set(struct devlink_port *devlink_port,
 				    const struct nlattr *attr,
 				    struct netlink_ext_ack *extack)
@@ -515,6 +551,13 @@ static int devlink_port_fn_caps_set(struct devlink_port *devlink_port,
 		err = devlink_port_fn_rx_gro_hw_set(devlink_port, caps_value &
 						    DEVLINK_PORT_FN_CAP_RX_GRO_HW,
 						    extack);
+		if (err)
+			return err;
+	}
+	if (caps.selector & DEVLINK_PORT_FN_CAP_MAX_SF) {
+		err = devlink_port_fn_max_sf_set(devlink_port, caps_value &
+						 DEVLINK_PORT_FN_CAP_MAX_SF,
+						 extack);
 		if (err)
 			return err;
 	}
@@ -873,6 +916,18 @@ static int devlink_port_function_validate(struct devlink_port *devlink_port,
 			if (devlink_port->attrs.flavour != DEVLINK_PORT_FLAVOUR_PCI_VF) {
 				NL_SET_ERR_MSG_ATTR(extack, attr,
 						    "gro function attribute supported for VFs only");
+				return -EOPNOTSUPP;
+			}
+		}
+		if (caps.selector & DEVLINK_PORT_FN_CAP_MAX_SF) {
+			if (!ops->port_fn_max_sf_set) {
+				NL_SET_ERR_MSG_ATTR(extack, attr,
+						    "Port doesn't support maximum subfunctions attribute");
+				return -EOPNOTSUPP;
+			}
+			if (devlink_port->attrs.flavour != DEVLINK_PORT_FLAVOUR_PCI_PF) {
+				NL_SET_ERR_MSG_ATTR(extack, attr,
+						    "maximum subfunctions attribute supported for PFs only");
 				return -EOPNOTSUPP;
 			}
 		}

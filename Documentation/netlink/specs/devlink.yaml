@@ -79,6 +79,8 @@ definitions:
         name: header-split-bit
       -
         name: rx-gro-hw-bit
+      -
+        name: max-subfunctions-bit
   -
     type: enum
     name: rate-type

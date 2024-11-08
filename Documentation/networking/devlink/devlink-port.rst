@@ -143,6 +143,9 @@ using `devlink port function set header_split` command.
 Users may also set the hardware GRO capability of the function using
 using `devlink port function set rx-gro-hw` command.
 
+Users may also set the maximum subfunctions capability of the function using
+using `devlink port function set max-subfunctions` command.
+
 Function attributes
 ===================
 
@@ -394,6 +397,31 @@ Driver-level configuration of hardware GRO may be controlled using ethtool.
     pci/0000:06:00.0/2: type eth netdev enp6s0pf0vf1 flavour pcivf pfnum 0 vfnum 1
         function:
             hw_addr 00:00:00:00:00:00 rx-gro-hw disable
+
+Maximum Subfunctions capability setup
+-------------------------------------
+
+A `Subfunction` is a lightweight function that has a parent PCI function on
+which it is deployed.  A user may set the maximum number of subfunctions
+that may be created for a parent PCI function.
+
+- Get maximum number of subfunctions of the PF device::
+
+    $ devlink port show pci/0000:06:00.0
+    pci/0000:06:00.0: type eth netdev enp6s0pf0 flavour pcipf pfnum 0
+        function:
+            hw_addr 00:00:00:00:00:00 max-subfunctions 8
+
+- Set maximum number of subfunctions of the PF device::
+
+    $ devlink port function set pci/0000:06:00.0 max-subfunctions 4
+
+    $ devlink port show pci/0000:06:00.0
+    pci/0000:06:00.0: type eth netdev enp6s0pf0 flavour pcipf pfnum 0
+        function:
+            hw_addr 00:00:00:00:00:00 max-subfunctions 4
+
+.. _subfunction:
 
 Subfunction
 ============

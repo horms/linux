@@ -1631,6 +1631,16 @@ void devlink_free(struct devlink *devlink);
  *			   capability. Should be used by device drivers to
  *			   enable/disable the hardware GRO capability of a
  *			   function managed by the devlink port.
+ * @port_fn_max_sf_get: Callback used to get port function's maximum number
+ *			of subfunctions. Should be used by device drivers
+ *			to report the current maximum number of subfunctions
+ *			that may be created with the devlink port as the
+ *			parent.
+ * @port_fn_max_sf_set: Callback used to set port function's maximum number
+ *			of subfunctions. Should be used by device drivers
+ *			to set the current maximum number of subfunctions
+ *			that may be created with the devlink port as the
+ *			parent.
  *
  * Note: Driver should return -EOPNOTSUPP if it doesn't support
  * port function (@port_fn_*) handling for a particular port.
@@ -1698,6 +1708,12 @@ struct devlink_port_ops {
 	int (*port_fn_rx_gro_hw_set)(struct devlink_port *devlink_port,
 				     bool enable,
 				     struct netlink_ext_ack *extack);
+	int (*port_fn_max_sf_get)(struct devlink_port *devlink_port,
+				  bool *is_enable,
+				  struct netlink_ext_ack *extack);
+	int (*port_fn_max_sf_set)(struct devlink_port *devlink_port,
+				  bool enable,
+				  struct netlink_ext_ack *extack);
 };
 
 void devlink_port_init(struct devlink *devlink,
